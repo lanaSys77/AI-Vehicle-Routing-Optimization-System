@@ -1,0 +1,405 @@
+#Name_Partner1: Bilal Ashhab ID: 1220307 Section: 2
+#name_Partner2: Lana Sayes ID: 1220785 Section: 1
+
+import random
+import math
+import copy
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+
+
+class Package:#declaring package class with testing input validation of priority wieght,num... attributes
+    def __init__(self, package_num, x, y, weight, priority):
+        if not (0 <= x <= 100 and 0 <= y <= 100):
+            raise ValueError("Coordinates must be between 0 and 100")
+        if not (1 <= priority <= 5):
+            raise ValueError("Priority must be between 1 and 5")
+
+        self.package_num = package_num
+        self.x = x
+        self.y = y
+        self.weight = weight
+        self.priority = priority
+
+    def __str__(self):
+        return f"Package#{self.package_num} at ({self.x}, {self.y}), Weight: {self.weight}, Priority: {self.priority}"
+
+
+class Vehicle:#defining vehicle class with its attributes
+    def __init__(self, capacity, vehicle_num):
+        self.vehicle_num = vehicle_num
+        self.capacity = capacity
+        self.packages = []
+        self.current_weight = 0.0
+
+    def can_add_package(self, package):
+        return self.current_weight + package.weight <= self.capacity#add the package in case total wieght less than or equal cars capacity
+
+    def add_package(self, package):
+        self.packages.append(package)
+        self.current_weight += package.weight
+
+    def remove_package(self, package):
+        self.packages.remove(package)
+        self.current_weight -= package.weight
+
+    def route_distance(self):
+        distance = 0.0
+        current_x, current_y = 0, 0
+        for pkg in self.packages:
+            distance += math.hypot(pkg.x - current_x, pkg.y - current_y)
+            current_x, current_y = pkg.x, pkg.y
+        distance += math.hypot(current_x, current_y)
+        return distance
+
+    def __str__(self):
+        return f"Vehicle#{self.vehicle_num} with Capacity: {self.capacity}, Current Load: {self.current_weight}, Packages: {[p.package_num for p in self.packages]}"
+
+
+
+#reading packages from input file named packages.txt
+def read_packages_from_file(filename):
+    packages = []
+    try:
+        with open(filename, 'r') as file:
+            package_id = 1
+            for line in file:
+                parts = line.strip().split()
+                if len(parts) != 4:
+                    print(f"Skipping invalid line: {line.strip()}")
+                    continue
+                try:
+                    pkg = Package(
+                        package_num=package_id,
+                        x=int(parts[0]),
+                        y=int(parts[1]),
+                        weight=float(parts[2]),
+                        priority=int(parts[3])
+                    )
+                    packages.append(pkg)
+                    package_id += 1
+                except ValueError as ve:
+                    print(f"Error reading line: {line.strip()} — {ve}")
+    except FileNotFoundError:
+        print(f"File {filename} not found.")
+    return packages
+
+#the vehicles num and capacity entered by user
+def get_vehicles_from_user():
+    vehicles = []
+    try:
+        num_vehicles = int(input("Enter number of vehicles: "))
+        vehicle_counter = 1  #initialize counter here
+        for _ in range(num_vehicles):
+            capacity = float(input(f"Enter capacity for Vehicle#{len(vehicles) + 1}: "))
+            vehicles.append(Vehicle(capacity, vehicle_counter))
+            vehicle_counter += 1 #increment counter
+    except ValueError:
+        print("Invalid input. Please enter numeric values.")
+    return vehicles
+
+
+
+
+def total_distance(vehicles):
+    return sum(vehicle.route_distance() for vehicle in vehicles)
+
+def calculate_penalty(vehicle):
+    penalty = 0
+    for i in range(len(vehicle.packages)):
+        for j in range(i + 1, len(vehicle.packages)):
+            if vehicle.packages[i].priority > vehicle.packages[j].priority:
+                penalty += 1
+    return penalty
+
+def total_penalty(vehicles):
+    return sum(calculate_penalty(v) for v in vehicles)
+
+
+#simulated annealing method
+def simulated_annealing(initial_vehicles, packages, initial_temp=1000, cooling_rate=0.99, stop_temp=1, iterations=100):#arrguments as required in proj file
+    alpha = 10 #weight for penalty impact
+    current_vehicles = copy.deepcopy(initial_vehicles)#copy
+    best_vehicles = copy.deepcopy(current_vehicles)
+    temp = initial_temp
+    current_distance = total_distance(current_vehicles)
+    current_penalty = total_penalty(current_vehicles)
+    current_fitness = current_distance + alpha * current_penalty#calculating fitness equation
+
+    best_distance = current_distance
+    best_penalty = current_penalty
+    best_fitness = current_fitness
+
+    while temp > stop_temp:
+        for _ in range(iterations):
+            new_vehicles = copy.deepcopy(current_vehicles)
+            v1 = random.choice(new_vehicles)
+            v2 = random.choice(new_vehicles)
+            if v1.packages and v2.packages:
+                p1 = random.choice(v1.packages)
+                p2 = random.choice(v2.packages)
+
+                if v1 != v2:
+                    if (v1.current_weight - p1.weight + p2.weight <= v1.capacity and
+                        v2.current_weight - p2.weight + p1.weight <= v2.capacity):
+                        v1.remove_package(p1)
+                        v2.remove_package(p2)
+                        v1.add_package(p2)
+                        v2.add_package(p1)
+                else:
+                    v1.remove_package(p1)
+                    v2.add_package(p1)
+
+                new_distance = total_distance(new_vehicles)
+                new_penalty = total_penalty(new_vehicles)
+                new_fitness = new_distance + alpha * new_penalty
+
+                delta = new_fitness - current_fitness
+
+                if delta < 0 or random.random() < math.exp(-delta / temp):
+                    current_vehicles = new_vehicles
+                    current_distance = new_distance
+                    current_penalty = new_penalty
+                    current_fitness = new_fitness
+
+                    if new_fitness < best_fitness:
+                        best_vehicles = copy.deepcopy(new_vehicles)
+                        best_distance = new_distance
+                        best_penalty = new_penalty
+                        best_fitness = new_fitness
+        temp *= cooling_rate
+
+    return best_vehicles, best_penalty
+
+
+
+def distribute_packages_randomly(packages, vehicles):
+
+    #remove packages that are too heavy for any vehicle
+    max_capacity = max(v.capacity for v in vehicles)
+    valid_packages = []
+    for pkg in packages:
+        if pkg.weight > max_capacity:
+            print(f"We removed Package#{pkg.package_num} — no vehicle can carry it.")
+        else:
+            valid_packages.append(pkg)
+
+    packages = valid_packages
+
+    total_pkg_weight = sum(p.weight for p in packages)
+    total_vehicle_capacity = sum(v.capacity for v in vehicles)
+
+    if total_pkg_weight > total_vehicle_capacity:
+        packages.sort(key=lambda p: p.priority)
+        while total_pkg_weight > total_vehicle_capacity and packages:
+            removed = packages.pop()
+            print(f"We removed Package#{removed.package_num} — not enough total capacity.")
+            total_pkg_weight -= removed.weight
+
+    random.shuffle(packages)
+    for package in packages:
+        random.shuffle(vehicles)
+        assigned = False
+        for vehicle in vehicles:
+            if vehicle.can_add_package(package):
+                vehicle.add_package(package)
+                assigned = True
+                break
+
+    return vehicles
+
+
+def plot_vehicle_paths(vehicles, packages):
+    colors = plt.get_cmap('tab20')
+    plt.figure(figsize=(12, 10))
+
+    for idx, vehicle in enumerate(vehicles):
+        if not vehicle.packages:
+            continue
+
+        path_x = [0]
+        path_y = [0]
+        coords = [(0, 0)]
+
+        for pkg in vehicle.packages:
+            path_x.append(pkg.x)
+            path_y.append(pkg.y)
+            coords.append((pkg.x, pkg.y))
+
+        path_x.append(0)
+        path_y.append(0)
+        coords.append((0, 0))
+
+        plt.plot(path_x, path_y, marker='o', label=f'Vehicle {vehicle.vehicle_num}', color=colors(idx % 20))
+
+        for i, pkg in enumerate(vehicle.packages):
+            plt.text(pkg.x + 1, pkg.y + 1, f'{pkg.package_num}', fontsize=8)
+
+        for i in range(len(coords) - 1):
+            x0, y0 = coords[i]
+            x1, y1 = coords[i + 1]
+            dx, dy = x1 - x0, y1 - y0
+            plt.arrow(x0, y0, dx * 0.8, dy * 0.8, head_width=1.5, head_length=2, fc=colors(idx % 20), ec=colors(idx % 20))
+
+    fitness = total_distance(vehicles)
+    penalty = total_penalty(vehicles)
+    title = f"Final Vehicle Routes\nTotal Distance: {fitness:.2f}, Penalty: {penalty}"
+
+    plt.title(title, fontsize=14)
+    plt.xlabel('X coordinate')
+    plt.ylabel('Y coordinate')
+    plt.xlim(0, 100)
+    plt.ylim(0, 100)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def genetic_algorithm(initial_vehicles, packages, population_size=50, generations=500, mutation_rate=0.05):
+    def create_individual(): #first we create 50 random individual which is 50 list of vehicles the packages distributed randomly between it
+        individual = copy.deepcopy(initial_vehicles)
+        distribute_packages_randomly(packages, individual)
+        return individual
+
+    def fitness(vehicles): #calculates fitness
+        alpha = 10
+        return total_distance(vehicles) + alpha * total_penalty(vehicles)
+
+    def crossover(parent1, parent2): #crossover between two random parents and produce two childs
+        child1 = [Vehicle(v.capacity, v.vehicle_num) for v in parent1]
+        child2 = [Vehicle(v.capacity, v.vehicle_num) for v in parent2]
+
+        assigned_packages_child1 = {v.vehicle_num: set() for v in child1}
+        assigned_packages_child2 = {v.vehicle_num: set() for v in child2}
+
+        for i in range(len(parent1)):
+            for p1, p2 in zip(parent1[i].packages, parent2[i].packages):
+                if random.random() < 0.5:
+                    if child1[i].can_add_package(p1) and p1.package_num not in assigned_packages_child1[
+                        child1[i].vehicle_num]:
+                        child1[i].add_package(p1)
+                        assigned_packages_child1[child1[i].vehicle_num].add(p1.package_num)
+                    if child2[i].can_add_package(p2) and p2.package_num not in assigned_packages_child2[
+                        child2[i].vehicle_num]:
+                        child2[i].add_package(p2)
+                        assigned_packages_child2[child2[i].vehicle_num].add(p2.package_num)
+                else:
+                    if child1[i].can_add_package(p2) and p2.package_num not in assigned_packages_child1[
+                        child1[i].vehicle_num]:
+                        child1[i].add_package(p2)
+                        assigned_packages_child1[child1[i].vehicle_num].add(p2.package_num)
+                    if child2[i].can_add_package(p1) and p1.package_num not in assigned_packages_child2[
+                        child2[i].vehicle_num]:
+                        child2[i].add_package(p1)
+                        assigned_packages_child2[child2[i].vehicle_num].add(p1.package_num)
+
+        # Fix duplicates and handle unassigned in child1 and child2
+        for child in [child1, child2]:
+            assigned_package_ids = set()
+            duplicate_packages = []
+            for v in child:
+                for p in v.packages:
+                    if p.package_num in assigned_package_ids:
+                        duplicate_packages.append(p)
+                    else:
+                        assigned_package_ids.add(p.package_num)
+
+            for duplicate_package in duplicate_packages:
+                for v in child:
+                    if duplicate_package in v.packages:
+                        v.remove_package(duplicate_package)
+                        break
+
+            #Handle Unassigned Packages (due to duplicate removal) and reasign them
+            unassigned_packages = []
+            for package in packages:
+                if package.package_num not in assigned_package_ids:
+                    unassigned_packages.append(package)
+
+            random.shuffle(unassigned_packages)
+            for unassigned_package in unassigned_packages:
+                possible_vehicles = [v for v in child if v.can_add_package(unassigned_package)]
+                if possible_vehicles:
+                    vehicle = random.choice(possible_vehicles)
+                    vehicle.add_package(unassigned_package)
+                else:
+                    print(f"Warning: Package {unassigned_package.package_num} could not be assigned in crossover.")
+
+        return child1, child2
+
+    def mutate(individual):
+        v1, v2 = random.sample(individual, 2)
+        # Only proceed if both vehicles have packages to swap
+        if v1.packages and v2.packages:
+            p1 = random.choice(v1.packages)
+            p2 = random.choice(v2.packages)
+            # Check if the swap is feasible (respects vehicle capacity)
+            if (v1.current_weight - p1.weight + p2.weight <= v1.capacity and
+                v2.current_weight - p2.weight + p1.weight <= v2.capacity):
+                v1.remove_package(p1)
+                v2.remove_package(p2)
+                v1.add_package(p2)
+                v2.add_package(p1)
+# for loop that creates children and controls genetic algorithm
+    population = [create_individual() for _ in range(population_size)]
+
+    for gen in range(generations):
+        offspring = []
+        for _ in range(population_size // 2):
+            p1, p2 = random.sample(population, 2)
+            c1, c2 = crossover(p1, p2)
+
+            if random.random() > mutation_rate:
+                mutate(c1)
+            if random.random() > mutation_rate:
+                mutate(c2)
+
+            offspring.extend([c1, c2])
+
+        combined = population + offspring
+        combined.sort(key=fitness)
+        population = combined[:population_size]
+
+    return population[0]
+
+def menu():
+    while True:
+        print("\nMenu:\n1 - Simulated Annealing\n2 - Genetic Algorithm\n3 - Exit")
+        choice = input("Choose an option (1-3): ").strip()
+
+        if choice == '3':
+            print("Exiting program.")
+            break
+        elif choice not in {'1', '2'}:
+            print("Wrong entry, try again.")
+            continue
+
+        packages = read_packages_from_file("packages.txt")
+        print("\nPackages loaded successfully\n")
+
+
+        vehicles = get_vehicles_from_user()
+        vehicles = distribute_packages_randomly(packages, vehicles)
+
+        print("\nVehicles entered:")
+        for vehicle in vehicles:
+            print(vehicle)
+        print(total_distance(vehicles))
+        print(total_penalty(vehicles))
+
+        if choice == '1':
+            print("\nStarting Simulated Annealing Optimization...")
+            optimized_vehicles, best_penalty = simulated_annealing(vehicles, packages)
+        elif choice == '2':
+            print("\nStarting Genetic Algorithm Optimization...")
+            optimized_vehicles = genetic_algorithm(vehicles, packages)
+
+        print("\nOptimized Vehicle Assignments:")
+        for vehicle in optimized_vehicles:
+            print(vehicle)
+
+        print(f"\nTotal Distance Traveled: {total_distance(optimized_vehicles):.2f} km")
+        plot_vehicle_paths(optimized_vehicles, packages)
+
+menu()
